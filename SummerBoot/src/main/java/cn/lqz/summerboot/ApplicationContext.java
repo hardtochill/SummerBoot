@@ -29,6 +29,9 @@ public class ApplicationContext {
     }
     // 容器本体，beanName：bean
     private Map<String,Object> ioc = new HashMap<>();
+    // 还未初始化完成的bean
+    private Map<String,Object> loadingIoc = new HashMap<>();
+
     // 用于判断相同名字的bean是否已存在，beanName：beanDefinition
     private Map<String,BeanDefinition> beanDefinitionMap = new HashMap<>();
     /**
@@ -40,6 +43,10 @@ public class ApplicationContext {
         String beanName = beanDefinition.getName();
         if(ioc.containsKey(beanName)){
             return ioc.get(beanName);
+        }
+        // 还未初始化完成，也返回
+        if(loadingIoc.containsKey(beanName)){
+            return loadingIoc.get(beanName);
         }
         // 创建Bean
         return doCreateBean(beanDefinition);
@@ -54,6 +61,8 @@ public class ApplicationContext {
         Object bean = null;
         try{
             bean = constructor.newInstance();
+            // bean创建出来后先加入loadingIoc
+            loadingIoc.put(beanDefinition.getName(),bean);
             // 进行@Autowired属性注入
             autowiredBean(bean,beanDefinition);
             // 调用@PostConstruct方法
@@ -61,8 +70,8 @@ public class ApplicationContext {
             if(null!=postConstructMethod){
                 postConstructMethod.invoke(bean);
             }
-            // 将Bean加入ioc
-            ioc.put(beanDefinition.getName(),bean);
+            // 将Bean加入ioc，同时将其从loadingIoc移除
+            ioc.put(beanDefinition.getName(),loadingIoc.remove(beanDefinition.getName()));
         }catch (Exception e){
             throw new RuntimeException();
         }
