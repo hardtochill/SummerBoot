@@ -65,17 +65,28 @@ public class ApplicationContext {
             loadingIoc.put(beanDefinition.getName(),bean);
             // 进行@Autowired属性注入
             autowiredBean(bean,beanDefinition);
-            // 调用@PostConstruct方法
-            Method postConstructMethod = beanDefinition.getPostConstructMethod();
-            if(null!=postConstructMethod){
-                postConstructMethod.invoke(bean);
-            }
+            // 初始化
+            initializeBean(bean,beanDefinition);
             // 将Bean加入ioc，同时将其从loadingIoc移除
             ioc.put(beanDefinition.getName(),loadingIoc.remove(beanDefinition.getName()));
         }catch (Exception e){
             throw new RuntimeException();
         }
         return bean;
+    }
+
+    /**
+     * 初始化，即调用@PostConstruct方法
+     * @param bean
+     * @param beanDefinition
+     * @throws InvocationTargetException
+     * @throws IllegalAccessException
+     */
+    private void initializeBean(Object bean, BeanDefinition beanDefinition) throws InvocationTargetException, IllegalAccessException {
+        Method postConstructMethod = beanDefinition.getPostConstructMethod();
+        if(null!=postConstructMethod){
+            postConstructMethod.invoke(bean);
+        }
     }
 
     /**
