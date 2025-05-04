@@ -1,14 +1,13 @@
 package cn.lqz.summerboot;
 
 import cn.lqz.summerboot.annotations.Component;
+import cn.lqz.summerboot.interfaces.BeanPostProcessor;
 
 import java.io.File;
-import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -18,15 +17,6 @@ import java.util.*;
  * Bean容器
  */
 public class ApplicationContext {
-    public ApplicationContext(String packageName) throws Exception {
-        initContext(packageName);
-    }
-    public void initContext(String packageName) throws Exception {
-        // 先加载所有BeanDefinition
-        scanPackage(packageName).stream().filter(this::scanCreate).forEach(this::wrapper);
-        // 再初创建Bean
-        beanDefinitionMap.values().forEach(this::createBean);
-    }
     // 容器本体，beanName：bean
     private Map<String,Object> ioc = new HashMap<>();
     // 还未初始化完成的bean
@@ -34,6 +24,30 @@ public class ApplicationContext {
 
     // 用于判断相同名字的bean是否已存在，beanName：beanDefinition
     private Map<String,BeanDefinition> beanDefinitionMap = new HashMap<>();
+
+    private List<BeanPostProcessor> beanPostProcessorList = new ArrayList<>();
+
+    public ApplicationContext(String packageName) throws Exception {
+        initContext(packageName);
+    }
+    public void initContext(String packageName) throws Exception {
+        // 先加载所有BeanDefinition
+        scanPackage(packageName).stream().filter(this::scanCreate).forEach(this::wrapper);
+        // 加载BeanPostProcessor
+        initializeBeanPostProcessor();
+        // 再初创建Bean
+        beanDefinitionMap.values().forEach(this::createBean);
+    }
+
+    private void initializeBeanPostProcessor() {
+        // BeanPostProcessor也是Bean，因此可以通过其BeanDefinitionMap进行构造
+        beanDefinitionMap.values().stream()
+                .filter(bm->BeanPostProcessor.class.isAssignableFrom(bm.getBeanType()))
+                .map(this::createBean)
+                .map(bean->(BeanPostProcessor)bean)
+                .forEach(beanPostProcessorList::add);
+    }
+
     /**
      * 根据BeanDefinition创建Bean
      * @param beanDefinition
@@ -66,9 +80,10 @@ public class ApplicationContext {
             // 进行@Autowired属性注入
             autowiredBean(bean,beanDefinition);
             // 初始化
-            initializeBean(bean,beanDefinition);
-            // 将Bean加入ioc，同时将其从loadingIoc移除
-            ioc.put(beanDefinition.getName(),loadingIoc.remove(beanDefinition.getName()));
+            bean = initializeBean(bean,beanDefinition);
+            // 此时loadingIoc中的bean是最初的bean，但是执行完initializeBean()后得到的bean可能是别的对象了
+            loadingIoc.remove(beanDefinition.getName());
+            ioc.put(beanDefinition.getName(),bean);
         }catch (Exception e){
             throw new RuntimeException();
         }
@@ -77,16 +92,27 @@ public class ApplicationContext {
 
     /**
      * 初始化，即调用@PostConstruct方法
+     *
      * @param bean
      * @param beanDefinition
+     * @return
      * @throws InvocationTargetException
      * @throws IllegalAccessException
      */
-    private void initializeBean(Object bean, BeanDefinition beanDefinition) throws InvocationTargetException, IllegalAccessException {
+    private Object initializeBean(Object bean, BeanDefinition beanDefinition) throws InvocationTargetException, IllegalAccessException {
+        // 执行beforeInitializeBean
+        for (BeanPostProcessor beanPostProcessor : beanPostProcessorList) {
+             bean = beanPostProcessor.beforeInitializeBean(bean, beanDefinition.getName());
+        }
         Method postConstructMethod = beanDefinition.getPostConstructMethod();
         if(null!=postConstructMethod){
             postConstructMethod.invoke(bean);
         }
+        // 执行afterInitializeBean
+        for (BeanPostProcessor beanPostProcessor : beanPostProcessorList) {
+            bean = beanPostProcessor.afterInitializeBean(bean, beanDefinition.getName());
+        }
+        return bean;
     }
 
     /**
