@@ -5,6 +5,7 @@ import cn.lqz.summerboot.annotations.Component;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URISyntaxException;
@@ -21,7 +22,10 @@ public class ApplicationContext {
         initContext(packageName);
     }
     public void initContext(String packageName) throws Exception {
-        scanPackage(packageName).stream().filter(this::scanCreate).map(this::wrapper).forEach(this::createBean);
+        // 先加载所有BeanDefinition
+        scanPackage(packageName).stream().filter(this::scanCreate).forEach(this::wrapper);
+        // 再初创建Bean
+        beanDefinitionMap.values().forEach(this::createBean);
     }
     // 容器本体，beanName：bean
     private Map<String,Object> ioc = new HashMap<>();
@@ -31,35 +35,51 @@ public class ApplicationContext {
      * 根据BeanDefinition创建Bean
      * @param beanDefinition
      */
-    protected void createBean(BeanDefinition beanDefinition){
+    protected Object createBean(BeanDefinition beanDefinition){
         // 已经在容器
         String beanName = beanDefinition.getName();
         if(ioc.containsKey(beanName)){
-            return;
+            return ioc.get(beanName);
         }
         // 创建Bean
-        try {
-            doCreateBean(beanDefinition);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        return doCreateBean(beanDefinition);
     }
     /**
      * 创建Bean
      * @param beanDefinition
      */
-    private void doCreateBean(BeanDefinition beanDefinition) throws Exception {
+    private Object doCreateBean(BeanDefinition beanDefinition){
         // 使用构造函数创建对象
         Constructor<?> constructor = beanDefinition.getConstructor();
-        Object bean = constructor.newInstance();
-        // 调用@PostConstruct方法
-        Method postConstructMethod = beanDefinition.getPostConstructMethod();
-        if(null!=postConstructMethod){
-            postConstructMethod.invoke(bean);
+        Object bean = null;
+        try{
+            bean = constructor.newInstance();
+            // 进行@Autowired属性注入
+            autowiredBean(bean,beanDefinition);
+            // 调用@PostConstruct方法
+            Method postConstructMethod = beanDefinition.getPostConstructMethod();
+            if(null!=postConstructMethod){
+                postConstructMethod.invoke(bean);
+            }
+            // 将Bean加入ioc
+            ioc.put(beanDefinition.getName(),bean);
+        }catch (Exception e){
+            throw new RuntimeException();
         }
-        // 将Bean加入ioc
-        ioc.put(beanDefinition.getName(),bean);
+        return bean;
+    }
 
+    /**
+     * 进行@Autowired属性注入
+     * @param bean
+     * @param beanDefinition
+     */
+    private void autowiredBean(Object bean,BeanDefinition beanDefinition) throws IllegalAccessException {
+        for (Field field : beanDefinition.getAutowiredFieldList()) {
+            field.setAccessible(true);
+            // 假设根据类型注入
+            field.set(bean,getBean(field.getType()));
+        }
     }
 
     /**
@@ -121,7 +141,19 @@ public class ApplicationContext {
     }
 
     public Object getBean(String name){
-        return ioc.get(name);
+        Object bean = ioc.get(name);
+        // ioc中有
+        if(null!=bean){
+            return bean;
+        }
+        // ioc中没有
+        // 有该BeanDefinition但是未初始化
+        if(beanDefinitionMap.containsKey(name)){
+            // 初始化Bean
+            return createBean(beanDefinitionMap.get(name));
+        }
+        // 没有该BeanDefinition
+        return null;
     }
 
     /**
@@ -135,12 +167,18 @@ public class ApplicationContext {
     public <T> T getBean(Class<T> beanType){
         // A.isAssignableFrom(B)，说明B是A的子类，可以给A赋值
         // 当调用getBean()要一个指定类型的Bean时，也可以返回ioc中该类型的子类Bean，只返回第一个匹配的
-        Optional<Object> first = ioc.values().stream().filter(iocBean -> beanType.isAssignableFrom(iocBean.getClass())).findFirst();
-        return (T)first;
+        // 此处遍历的是BeanDefinitionMap，因为BeanDefinition一定会全部先加载，如果要get的Bean还未加载，则顺势通过其BeanDefinition加载该Bean
+        String beanName = beanDefinitionMap.values().stream().filter(bm -> beanType.isAssignableFrom(bm.getBeanType())).map(BeanDefinition::getName).findFirst().orElse(null);
+        return (T)getBean(beanName);
     }
 
     public <T> List<T> getBeans(Class<T> beanType){
-        return ioc.values().stream().filter(iocBean -> beanType.isAssignableFrom(iocBean.getClass())).map(bean->(T)bean).toList();
+        return beanDefinitionMap.values().stream()
+                .filter(bm->beanType.isAssignableFrom(bm.getBeanType()))
+                .map(BeanDefinition::getName)
+                .map(this::getBean)
+                .map(bean->(T)bean)
+                .toList();
     }
 
 }
