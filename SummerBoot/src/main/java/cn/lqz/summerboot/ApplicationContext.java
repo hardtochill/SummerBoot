@@ -6,6 +6,7 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.*;
@@ -51,6 +52,11 @@ public class ApplicationContext {
         // 使用构造函数创建对象
         Constructor<?> constructor = beanDefinition.getConstructor();
         Object bean = constructor.newInstance();
+        // 调用@PostConstruct方法
+        Method postConstructMethod = beanDefinition.getPostConstructMethod();
+        if(null!=postConstructMethod){
+            postConstructMethod.invoke(bean);
+        }
         // 将Bean加入ioc
         ioc.put(beanDefinition.getName(),bean);
 
