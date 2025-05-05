@@ -32,7 +32,7 @@ public class ApplicationContext {
     }
     public void initContext(String packageName) throws Exception {
         // 先加载所有BeanDefinition
-        scanPackage(packageName).stream().filter(this::scanCreate).forEach(this::wrapper);
+        scanPackage(packageName).stream().filter(this::canCreate).forEach(this::wrapper);
         // 加载BeanPostProcessor
         initializeBeanPostProcessor();
         // 再初创建Bean
@@ -148,7 +148,7 @@ public class ApplicationContext {
      * @param type
      * @return
      */
-    protected boolean scanCreate(Class<?> type){
+    protected boolean canCreate(Class<?> type){
         return type.isAnnotationPresent(Component.class);
     }
 
