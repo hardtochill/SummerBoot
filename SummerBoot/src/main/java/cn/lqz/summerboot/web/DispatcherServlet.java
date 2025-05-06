@@ -13,16 +13,21 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class DispatcherServlet extends HttpServlet implements BeanPostProcessor {
     private Map<String,WebHandler> handlerMap = new HashMap<>();
+    // 进行模板替换的正则表达式
+    private static final Pattern PATTERN = Pattern.compile("\\{\\{(.*?)}}");
     @Override
     protected void service(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         // 找到要执行的controller
@@ -46,17 +51,44 @@ public class DispatcherServlet extends HttpServlet implements BeanPostProcessor 
                     resp.getWriter().write(JSONObject.toJSONString(result));
                 }
                 case HTML -> {
-                    resp.setContentType("text/html");
+                    resp.setContentType("text/html;charset=UTF-8");
                     resp.getWriter().write(result.toString());
                 }
                 case LOCAL -> {
-
+                    ModelAndView modelAndView = (ModelAndView)result;
+                    String view = modelAndView.getView();
+                    InputStream resourceAsStream = this.getClass().getClassLoader().getResourceAsStream(view);
+                    try(resourceAsStream){
+                        String html = new String(resourceAsStream.readAllBytes());
+                        // 渲染模板
+                        html = renderTemplate(html,modelAndView.getContext());
+                        resp.setContentType("text/html;charset=UTF-8");
+                        resp.getWriter().write(html.toString());
+                    }
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
 
+    }
+
+    /**
+     * 渲染模板
+     * @param template
+     * @param context
+     * @return
+     */
+    private String renderTemplate(String template, Map<String, String> context) {
+        Matcher matcher = PATTERN.matcher(template);
+        StringBuilder stringBuilder = new StringBuilder();
+        while(matcher.find()){
+            String key = matcher.group(1);
+            String value = context.getOrDefault(key,"");
+            matcher.appendReplacement(stringBuilder,Matcher.quoteReplacement(value));
+        }
+        matcher.appendTail(stringBuilder);
+        return stringBuilder.toString();
     }
 
     /**
